@@ -1,1 +1,1 @@
-# distributed_task_queue_GO
+# distributed_task_queue
