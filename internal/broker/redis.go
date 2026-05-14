@@ -2,50 +2,33 @@ package broker
 
 import (
 	"context"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 )
 type  RedisBroker struct {
-	client *redis.Client
+	Client *redis.Client
 }
 
-func NewRedisBroker(addr string) *RedisBroker {
+func NewRedisBroker(addr string , poolSize int) *RedisBroker {
 	return  &RedisBroker{
-		client: redis.NewClient(&redis.Options{Addr: addr}),
+		Client: redis.NewClient(&redis.Options{Addr: addr, PoolSize: poolSize}),
 	}
 }
 
-//Queue push task
-func(b *RedisBroker) Enqueue(ctx context.Context , stream string , taskData map[string]interface{}) error{
-	return b.client.XAdd(ctx , &redis.XAddArgs{
-		Stream: stream,
-		Values: taskData,
-	}).Err()
+func(b *RedisBroker) Publish(ctx context.Context , stream string , values map[string]interface{}) error {
+	return b.Client.XAdd(ctx , &redis.XAddArgs{Stream: stream , Values: values}).Err()
 }
-//Create Group if not Stream , auto create both of them
-func(b *RedisBroker) InitGroup(ctx context.Context , stream , group string) {
-	b.client.XGroupCreateMkStream(ctx , stream , group , "0")
-}
-func(b *RedisBroker) Consume(ctx context.Context , stream , group , consumer string) ([]redis.XMessage , error) {
-	res , err := b.client.XReadGroup(ctx , &redis.XReadGroupArgs{
-		Group: group,
-		Consumer: consumer,
-		Streams: []string{stream , ">"},
-		Count:  1,
-		Block: 0,
+
+func(b *RedisBroker) ReadBatch(ctx context.Context , stream , group , consumer string , count int64) ([]redis.XMessage , error) {
+	res , err := b.Client.XReadGroup(ctx , &redis.XReadGroupArgs{
+		Group: group, Consumer: consumer, Streams: []string{stream , ">"},
+		Count: count, Block: 2 * time.Second,
 	}).Result()
-
-	if err != nil {
-		return nil , err
-	}
-
-	if len(res) == 0 {
-		return nil , nil
-	}
-	return res[0].Messages , nil
+	return res[0].Messages , err
 }
 
 func(b *RedisBroker) Ack(ctx context.Context , stream , group , messageId string) error {
-	return b.client.XAck(ctx , stream , group , messageId).Err()
+	return b.Client.XAck(ctx , stream , group , messageId).Err()
 }
 
