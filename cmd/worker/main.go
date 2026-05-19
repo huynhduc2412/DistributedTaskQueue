@@ -2,10 +2,12 @@ package worker
 
 import (
 	"context"
+	"log"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/broker"
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/config"
@@ -27,6 +29,14 @@ func main() {
 		podName = "local-worker"
 	}
 	pool := workerpool.NewPool(cfg , rb , podName)
+
+	go func ()  {
+		ticker := time.NewTicker(30 * time.Second)
+		for range ticker.C {
+			s := pool.GetStatus()
+			log.Printf("STAS WorkerPool: Success: %d | Failed: %d | Uptime: %s" , s.SuccessCount , s.FailureCount , s.Uptime)
+		}	
+	}()
 
 	ctx , stop := signal.NotifyContext(context.Background() , os.Interrupt , syscall.SIGTERM)
 
