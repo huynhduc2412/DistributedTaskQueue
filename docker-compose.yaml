@@ -1,0 +1,28 @@
+
+services:
+  # 1. RUN Redis Server
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  # 2. RUN Producer (API)
+  producer:
+    build: .                 # Build Dockerfile current file
+    command: ["./producer-app"] # CMD RUN Producer
+    ports:
+      - "8080:8080"          # public port 8080 outside to call API
+    environment:
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - redis                #  Wait Redis run completely before running producer
+
+#Run WORKER
+  worker:
+    build: .
+    command: ["./worker-app"]   
+    environment:
+      - REDIS_ADDR=redis:6379
+      - POD_NAME=worker-node-1
+    depends_on:
+      - redis                # Wait Redis run completely before running worker

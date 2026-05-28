@@ -1,4 +1,4 @@
-package producer
+package main
 
 import (
 	"encoding/json"
@@ -11,16 +11,35 @@ import (
 
 func main() {
 	cfg := config.Load()
-	rb := broker.NewRedisBroker(cfg.RedisAdrr , 10)
+	rb := broker.NewRedisBroker(cfg.RedisAdrr, 10)
 
-	http.HandleFunc("/submit" , func(w http.ResponseWriter, r *http.Request){
+	http.HandleFunc("/submit", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		defer r.Body.Close()
+
 		var data map[string]interface{}
-		json.NewDecoder(r.Body).Decode(&data)
+		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+
+		if data == nil {
+			data = make(map[string]interface{})
+		}
 
 		data["job_id"] = uuid.New().String()
-		rb.Publish(r.Context() , cfg.StreamName , data)
+
+		if err := rb.Publish(r.Context(), cfg.StreamName, data); err != nil {
+			http.Error(w, "Failed to publish job", http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("Job Enqueued"))
-		
 	})
-	http.ListenAndServe(":8080" , nil)
+	http.ListenAndServe(":8080", nil)
 }
