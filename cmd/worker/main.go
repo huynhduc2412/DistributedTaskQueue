@@ -39,6 +39,15 @@ func main() {
 	}()
 
 	ctx , stop := signal.NotifyContext(context.Background() , os.Interrupt , syscall.SIGTERM)
+	
+	err := rb.Client.XGroupCreateMkStream(ctx , cfg.StreamName , cfg.GroupName , "0").Err()
+	if err != nil {
+		if err.Error() != "BUSYGROUP Consumer Group name already exists" {
+			log.Fatalf("Can't created Group name: %v" , err)
+		}
+	}else{
+		log.Printf("Created successfully Consumer Group [%s] for Stream [%s]" , cfg.GroupName , cfg.StreamName)
+	}
 
 	defer stop()
 	pool.Run(ctx)
