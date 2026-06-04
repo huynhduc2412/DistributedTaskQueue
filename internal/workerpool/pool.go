@@ -98,6 +98,7 @@ func (p *WorkerPool) dispatcher(ctx context.Context) {
 				case p.taskChan <- msg:
 				case <-ctx.Done():
 					//dont give task anymore
+					log.Println(ctx.Err())
 					return
 				}
 			}

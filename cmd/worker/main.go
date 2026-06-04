@@ -14,7 +14,6 @@ import (
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/task"
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/workerpool"
 )
-
 func main() {
 	cfg := config.Load()
 	//init broker (redis)

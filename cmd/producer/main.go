@@ -8,18 +8,27 @@ import (
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/broker"
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/config"
 )
+const maxLimit = 50000
+
 
 func main() {
 	cfg := config.Load()
 	rb := broker.NewRedisBroker(cfg.RedisAdrr, 10)
 
 	http.HandleFunc("/submit", func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		defer r.Body.Close()
+		//check rate limit for queue
+		queueLength , err := rb.Client.XLen(r.Context() , cfg.StreamName).Result()
+		if err == nil && queueLength > maxLimit {
+			w.WriteHeader(http.StatusTooManyRequests)
+			w.Write([]byte("ovarload system , please try again in a few minutes"))
+			return
+		}
 
 		var data map[string]interface{}
 		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
