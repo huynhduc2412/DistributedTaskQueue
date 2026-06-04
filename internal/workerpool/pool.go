@@ -87,7 +87,7 @@ func (p *WorkerPool) dispatcher(ctx context.Context) {
 			log.Println(ctx.Err())
 			return
 		default:
-			msgs, err := p.broker.ReadBatch(ctx, p.cfg.StreamName, p.cfg.GroupName, p.podName, 5)
+			msgs, err := p.broker.ReadBatch(ctx, p.cfg.StreamName, p.cfg.GroupName, p.podName, int64(p.numWorkers))
 			if err != nil {
 				log.Println(err.Error())
 				time.Sleep(1 * time.Second)
