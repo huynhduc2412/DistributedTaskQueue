@@ -5,6 +5,8 @@ services:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    networks:
+      - queue-network
 
   # 2. RUN Producer (API)
   producer:
@@ -14,15 +16,45 @@ services:
       - "8080:8080"          # public port 8080 outside to call API
     environment:
       - REDIS_ADDR=redis:6379
+    networks:
+      - queue-network
     depends_on:
       - redis                #  Wait Redis run completely before running producer
 
 #Run WORKER
   worker:
     build: .
-    command: ["./worker-app"]   
+    command: ["./worker-app"] 
+    ports:
+      - "8082:8082" # port promethues metrics  
     environment:
       - REDIS_ADDR=redis:6379
       - POD_NAME=worker-node-1
+    networks:
+      - queue-network
     depends_on:
       - redis                # Wait Redis run completely before running worker
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - queue-network # make sure using cluster network with redis and producer
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin # password default
+    networks:
+      - queue-network
+
+networks:
+  queue-network:
+    driver: bridge

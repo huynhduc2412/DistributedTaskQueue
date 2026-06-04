@@ -12,8 +12,23 @@ import (
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/broker"
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/config"
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/task"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 )
+
+var (
+	tasksProcessed = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "queue_tasks_processed_total",
+			Help: "The number of tasks was done",
+		},
+		[]string{"status" , "pod_name"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(tasksProcessed)
+}
 
 const maxRetries = 3
 
@@ -127,6 +142,7 @@ func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage) {
 		p.hanldRetry(ctx, msg, err)
 	} else {
 		atomic.AddUint64(&p.successCount, 1)
+		tasksProcessed.WithLabelValues("success" , p.podName).Inc()
 		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
 	}
 }
@@ -139,6 +155,7 @@ func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err err
 	}
 	if retryCount <= maxRetries {
 		atomic.AddUint64(&p.retryCount, 1)
+		tasksProcessed.WithLabelValues("retry"  , p.podName).Inc()
 		retryCount++
 
 		msg.Values["retry_count"] = strconv.Itoa(retryCount)
@@ -160,6 +177,7 @@ func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err err
 
 func (p *WorkerPool) moveToDLQ(ctx context.Context, msg redis.XMessage, finalErr error) {
 	atomic.AddUint64(&p.failureCount, 1)
+	tasksProcessed.WithLabelValues("failure" , p.podName).Inc()
 
 	msg.Values["final_error"] = finalErr.Error()
 	msg.Values["failed_at"] = time.Now().Format(time.RFC3339)

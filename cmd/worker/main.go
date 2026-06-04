@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/config"
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/task"
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/workerpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 func main() {
 	cfg := config.Load()
@@ -28,6 +30,14 @@ func main() {
 		podName = "local-worker"
 	}
 	pool := workerpool.NewPool(cfg , rb , podName)
+
+	go func ()  {
+		http.Handle("/metrics" , promhttp.Handler())
+		log.Println("Worker metrics is openning at port : 8082/metrics")
+		if err := http.ListenAndServe(":8082" , nil) ; err != nil {
+			log.Printf("Error metric worker at port 8082: %v" , err)
+		}	
+	}()
 
 	go func ()  {
 		ticker := time.NewTicker(30 * time.Second)

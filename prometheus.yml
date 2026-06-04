@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 5s # each 5 seconds crawl data 
+
+scrape_configs:
+  - job_name: 'go-producer'
+    static_configs:
+      - targets: ['producer:8080'] # Service Name in docker-compose
+
+  - job_name: 'go-worker'
+    static_configs:
+      - targets: ['worker:8082'] 
