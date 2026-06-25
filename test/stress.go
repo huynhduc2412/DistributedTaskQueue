@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 	"time"
 )
-
+	
 func main() {
-	totalRequests := 20 // nums request
-	concurrency := 1    // nums goroutine run concurrency
+	totalRequests := 1000 // nums request
+	concurrency := 1000    // nums goroutine run concurrency
 
 	url := "http://localhost:8080/submit"
 	payload := []byte(`{"type":"EMAIL","to":"stress@test.com"}`)
@@ -70,3 +70,5 @@ func main() {
 	log.Printf("Requests/sec   : %.2f",
 		float64(totalRequests)/duration.Seconds())
 }
+
+

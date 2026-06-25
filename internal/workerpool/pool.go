@@ -87,9 +87,55 @@ func (p *WorkerPool) Run(ctx context.Context) {
 	}
 
 	p.wg.Add(1)
-	go p.dispatcher(ctx)
+	go p.dispatcher(ctx) //read new task
+
+	// p.wg.Add(1)
+	// go p.reclaimPendingTasks(ctx) // read again stuck task for reasons (crash worker , bug ,...)
+
 	p.wg.Wait()
 	log.Println("workers done tasks!!")
+}
+// PEL SCAN STREAM IS STUCK (Use XAutoClaim)
+func (p *WorkerPool) reclaimPendingTasks(ctx context.Context) {
+	ticker := time.NewTicker(5 *time.Second)
+	defer p.wg.Done()
+	defer ticker.Stop()
+	//start scanning oldest tasks
+	startId := "0-0"
+
+	for {
+		select{
+		case <- ctx.Done():
+			log.Println(ctx.Err())
+			return
+		case <-ticker.C:
+			messages , nxtId , err := p.broker.Client.XAutoClaim(ctx , &redis.XAutoClaimArgs{
+				Stream: p.cfg.StreamName,
+				Group: p.cfg.GroupName,
+				Consumer: p.podName,
+				MinIdle: time.Minute, //definitely worker crash or bug about 10s is considered to stuck
+				Start: startId,
+				Count: 5,
+			}).Result()
+			
+			if err != nil {
+				continue
+			}
+			
+			//update newId for next loop
+			startId = nxtId
+			
+			for _ , msg := range messages {
+				select{
+				case p.taskChan <- msg:
+					log.Printf("Save taskId %s exit worker crash or bug" , msg.ID)
+				case <- ctx.Done():
+					log.Println(ctx.Err())
+					return
+				}
+			}
+		}
+	}
 }
 
 // read data and send data to workersPool
@@ -124,11 +170,31 @@ func (p *WorkerPool) dispatcher(ctx context.Context) {
 func (p *WorkerPool) worker(ctx context.Context, id int) {
 	defer p.wg.Done()
 	for msg := range p.taskChan {
-		p.exucteTask(ctx, msg)
+		p.exucteTask(ctx, msg , id)
 	}
 }
 
-func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage) {
+func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage , workerId int) {
+	//distributed lock and imdempotency task	
+	taskId := msg.ID
+	lockKey := "lock:task" + taskId
+	res , err := p.broker.Client.SetArgs(ctx , lockKey , "processing" , redis.SetArgs{
+		TTL: 2 * time.Minute,
+		Mode: "NX",
+	}).Result()
+
+	if err != nil {
+		log.Printf("[Worker-%d] check imdepotency wrong for task %s: %v" , workerId , taskId , err)
+		return
+	}
+	//other worker exucuted on this task 
+	if res != "OK" {
+		log.Printf("[Worker-%d] executing task was executed by other worker" , workerId)
+		return
+	}
+
+	log.Printf("[Worker-%d] Key obtained successfully. Task processing begins: %s" , workerId , taskId)
+
 	taskType := msg.Values["type"].(string)
 	// get handler in global registry
 	handler, err := task.GetHandler(taskType)
@@ -144,6 +210,11 @@ func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage) {
 		atomic.AddUint64(&p.successCount, 1)
 		tasksProcessed.WithLabelValues("success" , p.podName).Inc()
 		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
+	}
+	_ , err = p.broker.Client.Del(ctx , lockKey).Result() 
+	if err != nil {
+		log.Printf("Deleted lockKey for task executed error : %v" , err)
+		return
 	}
 }
 

@@ -43,21 +43,8 @@ func (b *RedisBroker) Publish(ctx context.Context, stream string, values map[str
 }
 
 func (b *RedisBroker) ReadBatch(ctx context.Context, stream, group, consumer string, count int64) ([]redis.XMessage, error) {
-	//read task back on PEL list weren't ack cause any problem (as worker down , server down , shutdown suddenly , ...)
-	res , err := b.Client.XReadGroup(ctx , &redis.XReadGroupArgs{
-		Group: group,
-		Consumer: consumer,
-		Streams: []string{stream , "0"},
-		Count: count,
-		Block: 100 * time.Millisecond,
-	}).Result()
-
-	if err == nil && len(res) > 0 && len(res[0].Messages) > 0 {
-		return res[0].Messages , nil
-	}
-
 	//read new task
-	res, err = b.Client.XReadGroup(ctx, &redis.XReadGroupArgs{
+	res, err := b.Client.XReadGroup(ctx, &redis.XReadGroupArgs{
 		Group:    group,
 		Consumer: consumer,
 		Streams:  []string{stream, ">"},
