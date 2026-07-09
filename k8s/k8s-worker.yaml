@@ -14,6 +14,7 @@ spec:
       labels:
         app: queue-worker
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
       - name: worker
         image: hduc2412/go-queue-app:v1 

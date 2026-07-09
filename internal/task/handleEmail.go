@@ -9,8 +9,8 @@ import (
 )
 
 func HandleEmail(ctx context.Context, payload map[string]interface{}) error {
-	//random 2->6s exucute
-	time.Sleep(time.Duration(rand.IntN(5) + 2) * time.Second)
+	//random 500ms->1s exucute
+	time.Sleep(time.Duration(rand.IntN(501) + 500) * time.Millisecond)
 	r := rand.IntN(2)
 	if r == 0 {
 		return errors.New("random wrong")

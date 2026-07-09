@@ -10,8 +10,8 @@ import (
 )
 	
 func main() {
-	totalRequests := 1000 // nums request
-	concurrency := 1000    // nums goroutine run concurrency
+	totalRequests := 100 // nums request
+	concurrency := 100   // nums goroutine run concurrency
 
 	url := "http://localhost:8080/submit"
 	payload := []byte(`{"type":"EMAIL","to":"stress@test.com"}`)
@@ -21,6 +21,11 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
+
+
+
+
+	
 	ch := make(chan struct{}, concurrency)
 
 	var successCount int64

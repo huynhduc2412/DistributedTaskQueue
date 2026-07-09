@@ -179,7 +179,7 @@ func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage , worker
 	taskId := msg.ID
 	lockKey := "lock:task" + taskId
 	res , err := p.broker.Client.SetArgs(ctx , lockKey , "processing" , redis.SetArgs{
-		TTL: 2 * time.Minute,
+		TTL: 30 * time.Millisecond,
 		Mode: "NX",
 	}).Result()
 

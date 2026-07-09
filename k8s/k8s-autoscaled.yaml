@@ -1,0 +1,21 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: redis-worker-scaler
+  namespace: default
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: queue-worker-deployment # 🌟 Chỉ đúng vào tên Deployment ở file trên của bạn
+  # pollingInterval: 10  # each 5s check Redis 
+  # cooldownPeriod: 30
+  minReplicaCount: 1
+  maxReplicaCount: 10
+  triggers:
+  - type: redis-stream
+    metadata:
+      address: redis-service:6379 # Get from Service Redis in my K8s cluster
+      stream: task_stream   
+      group: worker_group     
+      lag: "5"                    # Cứ tồn đọng 5 task chưa xử lý thì đẻ thêm 1 Pod

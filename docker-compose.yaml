@@ -11,6 +11,7 @@ services:
   # 2. RUN Producer (API)
   producer:
     build: .                 # Build Dockerfile current file
+    image: hduc2412/go-queue-app:v1
     command: ["./producer-app"] # CMD RUN Producer
     ports:
       - "8080:8080"          # public port 8080 outside to call API
@@ -24,6 +25,7 @@ services:
 #Run WORKER
   worker:
     build: .
+    image: hduc2412/go-queue-app:v1
     command: ["./worker-app"] 
     ports:
       - "8082:8082" # port promethues metrics  
