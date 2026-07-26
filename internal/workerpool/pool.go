@@ -2,6 +2,7 @@ package workerpool
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"runtime"
 	"strconv"
@@ -204,20 +205,35 @@ func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage, workerI
 	if err != nil {
 		log.Printf("Not found registry for %s", taskType)
 		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
+		_, _ = p.broker.Client.Del(ctx, lockKey).Result()
 		return
 	}
-	if err = handler(ctx, msg.Values); err != nil {
-		p.hanldRetry(ctx, msg, err)
-	} else {
-		atomic.AddUint64(&p.successCount, 1)
-		tasksProcessed.WithLabelValues("success", p.podName).Inc()
-		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
-	}
-	_, err = p.broker.Client.Del(ctx, lockKey).Result()
-	if err != nil {
-		log.Printf("Deleted lockKey for task executed error : %v", err)
-		return
-	}
+
+	var handlerErr error
+
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 1<<16)
+			n := runtime.Stack(buf, false)
+			handlerErr = fmt.Errorf("panic: %v", r)
+			log.Printf("[Worker-%d] panic while handling task %s: %v\n%s", workerId, taskId, r, string(buf[:n]))
+		}
+
+		if handlerErr != nil {
+			p.hanldRetry(ctx, msg, handlerErr)
+		} else {
+			atomic.AddUint64(&p.successCount, 1)
+			tasksProcessed.WithLabelValues("success", p.podName).Inc()
+			p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
+		}
+
+		_, err := p.broker.Client.Del(ctx, lockKey).Result()
+		if err != nil {
+			log.Printf("Deleted lockKey for task executed error : %v", err)
+		}
+	}()
+
+	handlerErr = handler(ctx, msg.Values)
 }
 
 // buildLuaArgs package [GroupName, MsgID, key1, val1, key2, val2...]
