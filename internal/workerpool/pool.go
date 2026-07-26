@@ -22,7 +22,7 @@ var (
 			Name: "queue_tasks_processed_total",
 			Help: "The number of tasks was done",
 		},
-		[]string{"status" , "pod_name"},
+		[]string{"status", "pod_name"},
 	)
 )
 
@@ -95,41 +95,42 @@ func (p *WorkerPool) Run(ctx context.Context) {
 	p.wg.Wait()
 	log.Println("workers done tasks!!")
 }
+
 // PEL SCAN STREAM IS STUCK (Use XAutoClaim)
 func (p *WorkerPool) reclaimPendingTasks(ctx context.Context) {
-	ticker := time.NewTicker(5 *time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer p.wg.Done()
 	defer ticker.Stop()
 	//start scanning oldest tasks
 	startId := "0-0"
 
 	for {
-		select{
-		case <- ctx.Done():
+		select {
+		case <-ctx.Done():
 			log.Println(ctx.Err())
 			return
 		case <-ticker.C:
-			messages , nxtId , err := p.broker.Client.XAutoClaim(ctx , &redis.XAutoClaimArgs{
-				Stream: p.cfg.StreamName,
-				Group: p.cfg.GroupName,
+			messages, nxtId, err := p.broker.Client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+				Stream:   p.cfg.StreamName,
+				Group:    p.cfg.GroupName,
 				Consumer: p.podName,
-				MinIdle: time.Minute, //definitely worker crash or bug about 10s is considered to stuck
-				Start: startId,
-				Count: 5,
+				MinIdle:  30 * time.Second, //definitely worker crash or bug about 30s is considered to stuck
+				Start:    startId,
+				Count:    5,
 			}).Result()
-			
+
 			if err != nil {
 				continue
 			}
-			
+
 			//update newId for next loop
 			startId = nxtId
-			
-			for _ , msg := range messages {
-				select{
+
+			for _, msg := range messages {
+				select {
 				case p.taskChan <- msg:
-					log.Printf("Save taskId %s exit worker crash or bug" , msg.ID)
-				case <- ctx.Done():
+					log.Printf("Save taskId %s exit worker crash or bug", msg.ID)
+				case <-ctx.Done():
 					log.Println(ctx.Err())
 					return
 				}
@@ -170,30 +171,31 @@ func (p *WorkerPool) dispatcher(ctx context.Context) {
 func (p *WorkerPool) worker(ctx context.Context, id int) {
 	defer p.wg.Done()
 	for msg := range p.taskChan {
-		p.exucteTask(ctx, msg , id)
+		p.exucteTask(ctx, msg, id)
 	}
 }
 
-func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage , workerId int) {
-	//distributed lock and imdempotency task	
+func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage, workerId int) {
+	//distributed lock and imdempotency task
 	taskId := msg.ID
 	lockKey := "lock:task" + taskId
-	res , err := p.broker.Client.SetArgs(ctx , lockKey , "processing" , redis.SetArgs{
-		TTL: 30 * time.Millisecond,
+	res, err := p.broker.Client.SetArgs(ctx, lockKey, "processing", redis.SetArgs{
+		TTL:  30 * time.Second,
 		Mode: "NX",
 	}).Result()
 
 	if err != nil {
-		log.Printf("[Worker-%d] check imdepotency wrong for task %s: %v" , workerId , taskId , err)
+		log.Printf("[Worker-%d] check imdepotency wrong for task %s: %v", workerId, taskId, err)
 		return
 	}
-	//other worker exucuted on this task 
+	//other worker exucuted on this task
 	if res != "OK" {
-		log.Printf("[Worker-%d] executing task was executed by other worker" , workerId)
+		log.Printf("[Worker-%d] executing task was executed by other worker", workerId)
+		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
 		return
 	}
 
-	log.Printf("[Worker-%d] Key obtained successfully. Task processing begins: %s" , workerId , taskId)
+	log.Printf("[Worker-%d] Key obtained successfully. Task processing begins: %s", workerId, taskId)
 
 	taskType := msg.Values["type"].(string)
 	// get handler in global registry
@@ -208,54 +210,102 @@ func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage , worker
 		p.hanldRetry(ctx, msg, err)
 	} else {
 		atomic.AddUint64(&p.successCount, 1)
-		tasksProcessed.WithLabelValues("success" , p.podName).Inc()
+		tasksProcessed.WithLabelValues("success", p.podName).Inc()
 		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
 	}
-	_ , err = p.broker.Client.Del(ctx , lockKey).Result() 
+	_, err = p.broker.Client.Del(ctx, lockKey).Result()
 	if err != nil {
-		log.Printf("Deleted lockKey for task executed error : %v" , err)
+		log.Printf("Deleted lockKey for task executed error : %v", err)
 		return
 	}
 }
 
+// buildLuaArgs package [GroupName, MsgID, key1, val1, key2, val2...]
+func buildLuaArgs(groupName, msgID string, values map[string]interface{}) []interface{} {
+	args := make([]interface{}, 0, 2+len(values)*2)
+	args = append(args, groupName, msgID)
+
+	for k, v := range values {
+		args = append(args, k, v)
+	}
+	return args
+}
+
+var luaRetryScript = redis.NewScript(`
+    -- KEYS[1]: Main Stream Name
+    -- ARGV[1]: Consumer Group Name
+    -- ARGV[2]: Old Message ID to ACK
+    -- ARGV[3...]: Payload Key-Value Pairs
+
+    -- 1. Push task into main streem again for retry
+    local new_id = redis.call('XADD', KEYS[1], '*', unpack(ARGV, 3))
+
+    -- 2. ACK remove old task from PEL of main stream
+    redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+
+    return new_id
+`)
+
+
+
 func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err error) {
-	// log.Printf("Error Task: %v and try retry if not ,move on DLQ." , err)
 	retryCount := 0
 	if val, ok := msg.Values["retry_count"].(string); ok {
 		retryCount, _ = strconv.Atoi(val)
 	}
 	if retryCount <= maxRetries {
 		atomic.AddUint64(&p.retryCount, 1)
-		tasksProcessed.WithLabelValues("retry"  , p.podName).Inc()
+		tasksProcessed.WithLabelValues("retry", p.podName).Inc()
 		retryCount++
 
 		msg.Values["retry_count"] = strconv.Itoa(retryCount)
 		msg.Values["last_error"] = err.Error()
 
-		err = p.broker.Publish(ctx, p.cfg.StreamName, msg.Values)
+		args := buildLuaArgs(p.cfg.GroupName, msg.ID, msg.Values)
+
+		_ , err := luaRetryScript.Run(ctx, p.broker.Client, []string{p.cfg.StreamName}, args...).Result()
+
 		if err != nil {
-			log.Printf("Error Pushed task back on main stream Queue: %v", err)
+			log.Printf("Error luaRetryScript: %v", err)
 		} else {
 			log.Printf("retry %d times for Task %s", retryCount, msg.ID)
 		}
 	} else {
 		//move on DLQ
 		p.moveToDLQ(ctx, msg, err)
+		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
 	}
-	//ack old task to remove on PEL
-	p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
 }
+
+
+var luaDLQScript = redis.NewScript(`
+    -- KEYS[1]: Main Stream Name
+    -- KEYS[2]: DLQ Stream Name
+    -- ARGV[1]: Consumer Group Name
+    -- ARGV[2]: Old Message ID to ACK
+    -- ARGV[3...]: Payload Key-Value Pairs
+
+    -- 1. Push failed task into DLQ stream
+    local dlq_id = redis.call('XADD', KEYS[2], '*', unpack(ARGV, 3))
+
+    -- 2. ACK old task from PEL of main stream
+    redis.call('XACK', KEYS[1], ARGV[1], ARGV[2])
+
+    return dlq_id
+`)
 
 func (p *WorkerPool) moveToDLQ(ctx context.Context, msg redis.XMessage, finalErr error) {
 	atomic.AddUint64(&p.failureCount, 1)
-	tasksProcessed.WithLabelValues("failure" , p.podName).Inc()
+	tasksProcessed.WithLabelValues("failure", p.podName).Inc()
 
 	msg.Values["final_error"] = finalErr.Error()
 	msg.Values["failed_at"] = time.Now().Format(time.RFC3339)
 
-	err := p.broker.Publish(ctx, p.cfg.DLQStream, msg.Values)
+	args := buildLuaArgs(p.cfg.GroupName, msg.ID, msg.Values)
+	err := luaDLQScript.Run(ctx, p.broker.Client, []string{p.cfg.StreamName, p.cfg.DLQStream}, args...).Err()
+
 	if err != nil {
-		log.Printf("Error when pushed on DLQ: %v", err)
+		log.Printf("Error luaDLQScript: %v", err)
 	} else {
 		log.Printf("Success move on DLQ with taskId %s", msg.ID)
 	}

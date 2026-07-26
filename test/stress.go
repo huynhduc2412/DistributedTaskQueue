@@ -21,10 +21,6 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-
-
-
-
 	
 	ch := make(chan struct{}, concurrency)
 
