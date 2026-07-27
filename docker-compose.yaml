@@ -8,6 +8,22 @@ services:
     networks:
       - queue-network
 
+  mysql:
+    image: mysql:8.0
+    container_name: mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: queue
+    ports:
+      - "3306:3306"
+    networks:
+      - queue-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
   # 2. RUN Producer (API)
   producer:
     build: .                 # Build Dockerfile current file
@@ -32,10 +48,14 @@ services:
     environment:
       - REDIS_ADDR=redis:6379
       - POD_NAME=worker-node-1
+      - MYSQL_DSN=root:root@tcp(mysql:3306)/queue?parseTime=true
     networks:
       - queue-network
     depends_on:
-      - redis                # Wait Redis run completely before running worker
+      redis:
+        condition: service_started
+      mysql:
+        condition: service_healthy
 
   prometheus:
     image: prom/prometheus:latest

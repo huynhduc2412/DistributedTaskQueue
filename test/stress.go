@@ -10,8 +10,8 @@ import (
 )
 	
 func main() {
-	totalRequests := 100 // nums request
-	concurrency := 100   // nums goroutine run concurrency
+	totalRequests := 2000 // nums request
+	concurrency := 2000   // nums goroutine run concurrency
 
 	url := "http://localhost:8080/submit"
 	payload := []byte(`{"type":"EMAIL","to":"stress@test.com"}`)

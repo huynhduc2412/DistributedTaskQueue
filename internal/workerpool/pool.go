@@ -12,6 +12,7 @@ import (
 
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/broker"
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/config"
+	"github.com/huynhduc2412/DistributedTaskQueue/internal/idempotency"
 	"github.com/huynhduc2412/DistributedTaskQueue/internal/task"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
@@ -43,27 +44,29 @@ type WorkerStatus struct {
 }
 
 type WorkerPool struct {
-	cfg          *config.Config
-	broker       *broker.RedisBroker
-	taskChan     chan redis.XMessage
-	numWorkers   int
-	wg           sync.WaitGroup
-	podName      string
-	successCount uint64
-	failureCount uint64
-	retryCount   uint64
-	startTime    time.Time
+	cfg              *config.Config
+	broker           *broker.RedisBroker
+	idempotencyStore idempotency.Store
+	taskChan         chan redis.XMessage
+	numWorkers       int
+	wg               sync.WaitGroup
+	podName          string
+	successCount     uint64
+	failureCount     uint64
+	retryCount       uint64
+	startTime        time.Time
 }
 
-func NewPool(cfs *config.Config, rb *broker.RedisBroker, podName string) *WorkerPool {
+func NewPool(cfs *config.Config, rb *broker.RedisBroker, podName string, store idempotency.Store) *WorkerPool {
 	cntWorkers := runtime.GOMAXPROCS(0)
 	return &WorkerPool{
-		cfg:        cfs,
-		broker:     rb,
-		numWorkers: cntWorkers,
-		taskChan:   make(chan redis.XMessage, cntWorkers*2),
-		podName:    podName,
-		startTime:  time.Now(),
+		cfg:              cfs,
+		broker:           rb,
+		idempotencyStore: store,
+		numWorkers:       cntWorkers,
+		taskChan:         make(chan redis.XMessage, cntWorkers*2),
+		podName:          podName,
+		startTime:        time.Now(),
 	}
 }
 
@@ -90,8 +93,8 @@ func (p *WorkerPool) Run(ctx context.Context) {
 	p.wg.Add(1)
 	go p.dispatcher(ctx) //read new task
 
-	// p.wg.Add(1)
-	// go p.reclaimPendingTasks(ctx) // read again stuck task for reasons (crash worker , bug ,...)
+	p.wg.Add(1)
+	go p.reclaimPendingTasks(ctx) // read again stuck task for reasons (crash worker , bug ,...)
 
 	p.wg.Wait()
 	log.Println("workers done tasks!!")
@@ -196,6 +199,24 @@ func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage, workerI
 		return
 	}
 
+	idempotencyKey := taskId
+	if jobID, ok := msg.Values["job_id"].(string); ok && jobID != "" {
+		idempotencyKey = jobID
+	}
+
+	acquired, err := p.idempotencyStore.TryAcquire(ctx, idempotencyKey)
+	if err != nil {
+		log.Printf("[Worker-%d] idempotency store error for task %s: %v", workerId, idempotencyKey, err)
+		_, _ = p.broker.Client.Del(ctx, lockKey).Result()
+		return
+	}
+	if !acquired {
+		log.Printf("[Worker-%d] task %s was already processed or is currently being handled; skipping", workerId, idempotencyKey)
+		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
+		_, _ = p.broker.Client.Del(ctx, lockKey).Result()
+		return
+	}
+
 	log.Printf("[Worker-%d] Key obtained successfully. Task processing begins: %s", workerId, taskId)
 
 	taskType := msg.Values["type"].(string)
@@ -220,8 +241,10 @@ func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage, workerI
 		}
 
 		if handlerErr != nil {
+			_ = p.idempotencyStore.Release(ctx, idempotencyKey)
 			p.hanldRetry(ctx, msg, handlerErr)
 		} else {
+			_ = p.idempotencyStore.MarkCompleted(ctx, idempotencyKey)
 			atomic.AddUint64(&p.successCount, 1)
 			tasksProcessed.WithLabelValues("success", p.podName).Inc()
 			p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
@@ -262,8 +285,6 @@ var luaRetryScript = redis.NewScript(`
     return new_id
 `)
 
-
-
 func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err error) {
 	retryCount := 0
 	if val, ok := msg.Values["retry_count"].(string); ok {
@@ -279,7 +300,7 @@ func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err err
 
 		args := buildLuaArgs(p.cfg.GroupName, msg.ID, msg.Values)
 
-		_ , err := luaRetryScript.Run(ctx, p.broker.Client, []string{p.cfg.StreamName}, args...).Result()
+		_, err := luaRetryScript.Run(ctx, p.broker.Client, []string{p.cfg.StreamName}, args...).Result()
 
 		if err != nil {
 			log.Printf("Error luaRetryScript: %v", err)
@@ -292,7 +313,6 @@ func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err err
 		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
 	}
 }
-
 
 var luaDLQScript = redis.NewScript(`
     -- KEYS[1]: Main Stream Name

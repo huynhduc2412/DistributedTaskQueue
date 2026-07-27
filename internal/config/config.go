@@ -5,18 +5,20 @@ import (
 )
 
 type Config struct {
-	RedisAdrr string 
+	RedisAdrr  string
 	StreamName string
-	GroupName string
-	DLQStream string
+	GroupName  string
+	DLQStream  string
+	MYSQL_DSN  string
 }
 
 func Load() *Config {
-	return &Config{ 
-		RedisAdrr: getEnv("REDIS_ADDR" , "localhost:6379"),
+	return &Config{
+		RedisAdrr:  getEnv("REDIS_ADDR", "localhost:6379"),
 		StreamName: "task_stream",
-		GroupName: "worker_group",
-		DLQStream: "task_stream:dlq",
+		GroupName:  "worker_group",
+		DLQStream:  "task_stream:dlq",
+		MYSQL_DSN:  getEnv("MYSQL_DSN", "root:root@tcp(127.0.0.1:3306)/queue?parseTime=true"),
 	}
 }
 
