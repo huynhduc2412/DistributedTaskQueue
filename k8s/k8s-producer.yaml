@@ -5,7 +5,7 @@ metadata:
   labels:
     app: queue-producer
 spec:
-  replicas: 2 # 2 Pod if 1 Pod die, API system (High Availability)
+  replicas: 2
   selector:
     matchLabels:
       app: queue-producer
@@ -13,25 +13,32 @@ spec:
     metadata:
       labels:
         app: queue-producer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8080"
     spec:
       containers:
-      - name: producer
-        image: hduc2412/go-queue-app:v1 
-        command: ["./producer-app"]          
-        ports:
-        - containerPort: 8080
-        env:
-        - name: REDIS_ADDR
-          value: "redis-service:6379"
+        - name: producer
+          image: hduc2412/go-queue-app:v1
+          imagePullPolicy: Always
+          command: ["./producer-app"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: REDIS_ADDR
+              value: "redis-service:6379"
 ---
 apiVersion: v1
 kind: Service
 metadata:
   name: queue-producer-service
 spec:
-  type: LoadBalancer # Create IP public to calling from Postman
+  type: LoadBalancer
   ports:
-  - port: 8080
-    targetPort: 8080
+    - name: http
+      port: 8080
+      targetPort: http
   selector:
     app: queue-producer

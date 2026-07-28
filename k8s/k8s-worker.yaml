@@ -5,7 +5,6 @@ metadata:
   labels:
     app: queue-worker
 spec:
-  # the number of replicas default is 1, KEDA will auto scale increase/decrease 1-10 base on queue
   selector:
     matchLabels:
       app: queue-worker
@@ -13,16 +12,26 @@ spec:
     metadata:
       labels:
         app: queue-worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/path: /metrics
+        prometheus.io/port: "8082"
     spec:
       terminationGracePeriodSeconds: 30
       containers:
-      - name: worker
-        image: hduc2412/go-queue-app:v1 
-        command: ["./worker-app"]             
-        env:
-        - name: REDIS_ADDR
-          value: "redis-service:6379"
-        - name: POD_NAME
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.name 
+        - name: worker
+          image: hduc2412/go-queue-app:v1
+          imagePullPolicy: Always
+          command: ["./worker-app"]
+          ports:
+            - name: metrics
+              containerPort: 8082
+          env:
+            - name: REDIS_ADDR
+              value: "redis-service:6379"
+            - name: MYSQL_DSN
+              value: "root:root@tcp(mysql-service:3306)/queue?parseTime=true"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name

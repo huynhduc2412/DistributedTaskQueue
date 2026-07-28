@@ -22,14 +22,57 @@ var (
 	tasksProcessed = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "queue_tasks_processed_total",
-			Help: "The number of tasks was done",
+			Help: "Total task processing outcomes.",
 		},
 		[]string{"status", "pod_name"},
+	)
+	taskExecutionDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "queue_task_execution_duration_seconds",
+			Help:    "Time spent executing a task and recording its outcome.",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5, 10, 30},
+		},
+		[]string{"task_type", "status", "pod_name"},
+	)
+	tasksReclaimed = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "queue_tasks_reclaimed_total",
+			Help: "Total pending tasks reclaimed after their consumer was idle.",
+		},
+		[]string{"pod_name"},
+	)
+	consumerGroupLag = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "queue_consumer_group_lag",
+			Help: "Number of stream messages not yet delivered to the consumer group; -1 means Redis cannot determine lag.",
+		},
+		[]string{"pod_name"},
+	)
+	pendingMessages = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "queue_pending_messages",
+			Help: "Number of messages pending acknowledgement in the consumer group.",
+		},
+		[]string{"pod_name"},
+	)
+	dlqMessages = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "queue_dlq_messages",
+			Help: "Number of messages currently stored in the dead-letter stream.",
+		},
+		[]string{"pod_name"},
 	)
 )
 
 func init() {
-	prometheus.MustRegister(tasksProcessed)
+	prometheus.MustRegister(
+		tasksProcessed,
+		taskExecutionDuration,
+		tasksReclaimed,
+		consumerGroupLag,
+		pendingMessages,
+		dlqMessages,
+	)
 }
 
 const maxRetries = 3
@@ -96,8 +139,56 @@ func (p *WorkerPool) Run(ctx context.Context) {
 	p.wg.Add(1)
 	go p.reclaimPendingTasks(ctx) // read again stuck task for reasons (crash worker , bug ,...)
 
+	p.wg.Add(1)
+	go p.monitorQueueHealth(ctx)
+
 	p.wg.Wait()
 	log.Println("workers done tasks!!")
+}
+
+func (p *WorkerPool) monitorQueueHealth(ctx context.Context) {
+	defer p.wg.Done()
+
+	p.updateQueueHealth(ctx)
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			p.updateQueueHealth(ctx)
+		}
+	}
+}
+
+func (p *WorkerPool) updateQueueHealth(ctx context.Context) {
+	groups, err := p.broker.Client.XInfoGroups(ctx, p.cfg.StreamName).Result()
+	if err != nil {
+		log.Printf("Read consumer group metrics error: %v", err)
+	} else {
+		for _, group := range groups {
+			if group.Name == p.cfg.GroupName {
+				consumerGroupLag.WithLabelValues(p.podName).Set(float64(group.Lag))
+				break
+			}
+		}
+	}
+
+	pending, err := p.broker.Client.XPending(ctx, p.cfg.StreamName, p.cfg.GroupName).Result()
+	if err != nil {
+		log.Printf("Read pending message metrics error: %v", err)
+	} else {
+		pendingMessages.WithLabelValues(p.podName).Set(float64(pending.Count))
+	}
+
+	dlqLength, err := p.broker.Client.XLen(ctx, p.cfg.DLQStream).Result()
+	if err != nil {
+		log.Printf("Read dead-letter queue metrics error: %v", err)
+	} else {
+		dlqMessages.WithLabelValues(p.podName).Set(float64(dlqLength))
+	}
 }
 
 // PEL SCAN STREAM IS STUCK (Use XAutoClaim)
@@ -133,6 +224,7 @@ func (p *WorkerPool) reclaimPendingTasks(ctx context.Context) {
 			for _, msg := range messages {
 				select {
 				case p.taskChan <- msg:
+					tasksReclaimed.WithLabelValues(p.podName).Inc()
 					log.Printf("Save taskId %s exit worker crash or bug", msg.ID)
 				case <-ctx.Done():
 					log.Println(ctx.Err())
@@ -231,6 +323,7 @@ func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage, workerI
 	}
 
 	var handlerErr error
+	startedAt := time.Now()
 
 	defer func() {
 		if r := recover(); r != nil {
@@ -240,15 +333,17 @@ func (p *WorkerPool) exucteTask(ctx context.Context, msg redis.XMessage, workerI
 			log.Printf("[Worker-%d] panic while handling task %s: %v\n%s", workerId, taskId, r, string(buf[:n]))
 		}
 
+		outcome := "success"
 		if handlerErr != nil {
 			_ = p.idempotencyStore.Release(ctx, idempotencyKey)
-			p.hanldRetry(ctx, msg, handlerErr)
+			outcome = p.hanldRetry(ctx, msg, handlerErr)
 		} else {
 			_ = p.idempotencyStore.MarkCompleted(ctx, idempotencyKey)
 			atomic.AddUint64(&p.successCount, 1)
 			tasksProcessed.WithLabelValues("success", p.podName).Inc()
 			p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
 		}
+		taskExecutionDuration.WithLabelValues(metricTaskType(taskType), outcome, p.podName).Observe(time.Since(startedAt).Seconds())
 
 		_, err := p.broker.Client.Del(ctx, lockKey).Result()
 		if err != nil {
@@ -285,7 +380,7 @@ var luaRetryScript = redis.NewScript(`
     return new_id
 `)
 
-func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err error) {
+func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err error) string {
 	retryCount := 0
 	if val, ok := msg.Values["retry_count"].(string); ok {
 		retryCount, _ = strconv.Atoi(val)
@@ -307,10 +402,12 @@ func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err err
 		} else {
 			log.Printf("retry %d times for Task %s", retryCount, msg.ID)
 		}
+		return "retry"
 	} else {
 		//move on DLQ
 		p.moveToDLQ(ctx, msg, err)
 		p.broker.Ack(ctx, p.cfg.StreamName, p.cfg.GroupName, msg.ID)
+		return "dlq"
 	}
 }
 
@@ -332,7 +429,7 @@ var luaDLQScript = redis.NewScript(`
 
 func (p *WorkerPool) moveToDLQ(ctx context.Context, msg redis.XMessage, finalErr error) {
 	atomic.AddUint64(&p.failureCount, 1)
-	tasksProcessed.WithLabelValues("failure", p.podName).Inc()
+	tasksProcessed.WithLabelValues("dlq", p.podName).Inc()
 
 	msg.Values["final_error"] = finalErr.Error()
 	msg.Values["failed_at"] = time.Now().Format(time.RFC3339)
@@ -344,5 +441,14 @@ func (p *WorkerPool) moveToDLQ(ctx context.Context, msg redis.XMessage, finalErr
 		log.Printf("Error luaDLQScript: %v", err)
 	} else {
 		log.Printf("Success move on DLQ with taskId %s", msg.ID)
+	}
+}
+
+func metricTaskType(taskType string) string {
+	switch taskType {
+	case "EMAIL", "IMAGE":
+		return taskType
+	default:
+		return "UNKNOWN"
 	}
 }

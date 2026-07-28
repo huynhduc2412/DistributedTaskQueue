@@ -8,14 +8,13 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: queue-worker-deployment
-  pollingInterval: 10  # each 1m check Redis 
-  cooldownPeriod: 20
   minReplicaCount: 1
   maxReplicaCount: 10
   triggers:
-  - type: redis-streams
-    metadata:
-      address: redis-service.default.svc.cluster.local:6379 # Get from Service Redis in my K8s cluster
-      stream: task_stream   
-      group: worker_group     
-      lag: "20"                    # Cứ tồn đọng 20 task chưa xử lý thì đẻ thêm 1 Pod
+    - type: redis-streams
+      metadata:
+        address: redis-service.default.svc.cluster.local:6379
+        stream: task_stream
+        consumerGroup: worker_group
+        lagCount: "20"
+        activationLagCount: "0"

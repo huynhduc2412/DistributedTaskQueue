@@ -1,0 +1,177 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+  namespace: monitoring
+data:
+  datasource.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: false
+  dashboard-provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: Distributed Task Queue
+        orgId: 1
+        folder: Distributed Task Queue
+        type: file
+        disableDeletion: true
+        editable: false
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard
+  namespace: monitoring
+data:
+  kubernetes-task-queue.json: |
+    {
+      "annotations": {"list": []},
+      "editable": false,
+      "panels": [
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "id": 1,
+          "targets": [
+            {"expr": "kube_deployment_spec_replicas{namespace=\"default\",deployment=\"queue-worker-deployment\"}", "legendFormat": "desired", "refId": "A"},
+            {"expr": "kube_deployment_status_replicas_available{namespace=\"default\",deployment=\"queue-worker-deployment\"}", "legendFormat": "available", "refId": "B"}
+          ],
+          "title": "Worker replicas (KEDA target)",
+          "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "id": 2,
+          "targets": [
+            {"expr": "sum by (pod) (kube_pod_status_ready{namespace=\"default\",condition=\"true\"})", "legendFormat": "{{pod}}", "refId": "A"}
+          ],
+          "title": "Ready pods", "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "cores"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "id": 3,
+          "targets": [
+            {"expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=\"default\",pod!=\"\"}[$__rate_interval]))", "legendFormat": "{{pod}}", "refId": "A"}
+          ],
+          "title": "CPU usage by pod", "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "bytes"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "id": 4,
+          "targets": [
+            {"expr": "sum by (pod) (container_memory_working_set_bytes{namespace=\"default\",pod!=\"\"})", "legendFormat": "{{pod}}", "refId": "A"}
+          ],
+          "title": "Memory usage by pod", "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "id": 5,
+          "targets": [
+            {"expr": "sum by (pod) (kube_pod_container_status_restarts_total{namespace=\"default\"})", "legendFormat": "{{pod}}", "refId": "A"}
+          ],
+          "title": "Container restarts by pod", "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "id": 6,
+          "targets": [
+            {"expr": "max(queue_consumer_group_lag{namespace=\"default\"})", "legendFormat": "lag", "refId": "A"},
+            {"expr": "max(queue_pending_messages{namespace=\"default\"})", "legendFormat": "PEL pending", "refId": "B"},
+            {"expr": "max(queue_dlq_messages{namespace=\"default\"})", "legendFormat": "DLQ", "refId": "C"}
+          ],
+          "title": "Queue health", "type": "timeseries"
+        },
+        {
+          "datasource": {"type": "prometheus", "uid": "prometheus"},
+          "fieldConfig": {"defaults": {"unit": "ops"}, "overrides": []},
+          "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
+          "id": 7,
+          "targets": [
+            {"expr": "sum by (status) (rate(queue_tasks_processed_total{namespace=\"default\"}[$__rate_interval]))", "legendFormat": "{{status}} / s", "refId": "A"}
+          ],
+          "title": "Task outcomes", "type": "timeseries"
+        }
+      ],
+      "refresh": "5s",
+      "schemaVersion": 41,
+      "time": {"from": "now-1h", "to": "now"},
+      "title": "Kubernetes Task Queue",
+      "uid": "kubernetes-task-queue",
+      "version": 1
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.2.0
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: admin
+          volumeMounts:
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/datasources/datasource.yaml
+              subPath: datasource.yaml
+            - name: provisioning
+              mountPath: /etc/grafana/provisioning/dashboards/dashboard-provider.yaml
+              subPath: dashboard-provider.yaml
+            - name: dashboard
+              mountPath: /var/lib/grafana/dashboards
+      volumes:
+        - name: provisioning
+          configMap:
+            name: grafana-provisioning
+        - name: dashboard
+          configMap:
+            name: grafana-dashboard
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+spec:
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+  selector:
+    app: grafana

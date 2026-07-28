@@ -6,8 +6,8 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o worker-app ./cmd/worker/main.go
-RUN CGO_ENABLED=0 GOOS=linux go build -o producer-app ./cmd/producer/main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o worker-app ./cmd/worker
+RUN CGO_ENABLED=0 GOOS=linux go build -o producer-app ./cmd/producer
 
 FROM alpine:latest
 WORKDIR /app
