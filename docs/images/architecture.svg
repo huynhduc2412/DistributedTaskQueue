@@ -1,0 +1,222 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040" role="img" aria-labelledby="title desc">
+  <title id="title">Distributed Task Queue architecture</title>
+  <desc id="desc">A diagram showing the Go producer, Redis Streams, worker deployment, MySQL idempotency, KEDA autoscaling, Prometheus, and Grafana.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="1" stop-color="#172554"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#172033"/>
+      <stop offset="1" stop-color="#101827"/>
+    </linearGradient>
+    <linearGradient id="producer" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e7490"/>
+      <stop offset="1" stop-color="#155e75"/>
+    </linearGradient>
+    <linearGradient id="redis" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b91c1c"/>
+      <stop offset="1" stop-color="#7f1d1d"/>
+    </linearGradient>
+    <linearGradient id="worker" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6d28d9"/>
+      <stop offset="1" stop-color="#4c1d95"/>
+    </linearGradient>
+    <linearGradient id="mysql" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a16207"/>
+      <stop offset="1" stop-color="#713f12"/>
+    </linearGradient>
+    <linearGradient id="keda" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#047857"/>
+      <stop offset="1" stop-color="#065f46"/>
+    </linearGradient>
+    <linearGradient id="prometheus" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c2410c"/>
+      <stop offset="1" stop-color="#9a3412"/>
+    </linearGradient>
+    <linearGradient id="grafana" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#db2777"/>
+      <stop offset="1" stop-color="#9d174d"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#020617" flood-opacity="0.42"/>
+    </filter>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2dd4bf"/></marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#fbbf24"/></marker>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#fb7185"/></marker>
+    <marker id="arrow-green" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#34d399"/></marker>
+    <marker id="arrow-orange" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#fb923c"/></marker>
+    <style>
+      .title { font: 700 38px Inter, ui-sans-serif, system-ui, sans-serif; fill: #f8fafc; letter-spacing: -.6px; }
+      .subtitle { font: 400 17px Inter, ui-sans-serif, system-ui, sans-serif; fill: #94a3b8; }
+      .plane { font: 700 14px Inter, ui-sans-serif, system-ui, sans-serif; fill: #94a3b8; letter-spacing: 2px; }
+      .card-title { font: 700 21px Inter, ui-sans-serif, system-ui, sans-serif; fill: #ffffff; }
+      .card-copy { font: 400 15px Inter, ui-sans-serif, system-ui, sans-serif; fill: #e2e8f0; }
+      .tiny { font: 500 13px Inter, ui-sans-serif, system-ui, sans-serif; fill: #cbd5e1; }
+      .label { font: 600 13px Inter, ui-sans-serif, system-ui, sans-serif; fill: #e2e8f0; }
+      .success { font: 700 13px Inter, ui-sans-serif, system-ui, sans-serif; fill: #86efac; }
+      .warning { font: 700 13px Inter, ui-sans-serif, system-ui, sans-serif; fill: #fde68a; }
+      .danger { font: 700 13px Inter, ui-sans-serif, system-ui, sans-serif; fill: #fda4af; }
+    </style>
+  </defs>
+
+  <rect width="1600" height="1040" rx="28" fill="url(#background)"/>
+  <path d="M0 104 H1600 M0 548 H1600" stroke="#334155" stroke-opacity=".68"/>
+  <text x="70" y="62" class="title">Distributed Task Queue</text>
+  <text x="70" y="88" class="subtitle">Event-driven Go workers · Redis Streams · Kubernetes autoscaling · built-in observability</text>
+
+  <!-- data plane -->
+  <rect x="48" y="132" width="1504" height="372" rx="22" fill="#0f172a" fill-opacity=".56" stroke="#334155"/>
+  <text x="78" y="165" class="plane">DATA PLANE · ASYNCHRONOUS TASK PROCESSING</text>
+  <rect x="1325" y="143" width="194" height="26" rx="13" fill="#1e293b" stroke="#475569"/>
+  <text x="1351" y="161" class="label">default namespace</text>
+
+  <!-- client -->
+  <g filter="url(#shadow)">
+    <rect x="82" y="245" width="184" height="108" rx="18" fill="#1e293b" stroke="#475569"/>
+    <circle cx="119" cy="286" r="17" fill="#334155"/>
+    <path d="M110 288h18M119 279v18" stroke="#e2e8f0" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="150" y="283" class="card-title">Client</text>
+    <text x="150" y="307" class="card-copy">POST /submit</text>
+    <text x="150" y="328" class="tiny">JSON task</text>
+  </g>
+
+  <!-- producer -->
+  <g filter="url(#shadow)">
+    <rect x="342" y="205" width="264" height="184" rx="20" fill="url(#producer)" stroke="#67e8f9" stroke-opacity=".55"/>
+    <circle cx="380" cy="247" r="17" fill="#164e63" stroke="#a5f3fc"/>
+    <path d="M371 247h18M380 238v18" stroke="#a5f3fc" stroke-width="2.5" stroke-linecap="round"/>
+    <text x="413" y="246" class="card-title">Go Producer</text>
+    <text x="370" y="285" class="card-copy">queue-producer-service :8080</text>
+    <text x="370" y="314" class="tiny">POST /submit · /metrics</text>
+    <text x="370" y="338" class="tiny">UUID job_id · XLEN guard · XADD</text>
+    <rect x="370" y="352" width="126" height="24" rx="12" fill="#155e75" stroke="#67e8f9" stroke-opacity=".45"/>
+    <text x="387" y="369" class="label">HTTP API</text>
+  </g>
+
+  <!-- redis -->
+  <g filter="url(#shadow)">
+    <rect x="692" y="184" width="330" height="226" rx="20" fill="url(#redis)" stroke="#fca5a5" stroke-opacity=".62"/>
+    <circle cx="732" cy="227" r="18" fill="#7f1d1d" stroke="#fecaca"/>
+    <path d="M723 220c7-7 20-2 20 7s-13 14-20 7c-7-7 2-19 10-14" fill="none" stroke="#fecaca" stroke-width="2.4" stroke-linecap="round"/>
+    <text x="767" y="226" class="card-title">Redis Streams</text>
+    <text x="721" y="266" class="card-copy">redis-service :6379 · task_stream</text>
+    <text x="721" y="290" class="tiny">consumer group: worker_group</text>
+    <line x1="721" y1="309" x2="991" y2="309" stroke="#fca5a5" stroke-opacity=".35"/>
+    <text x="721" y="334" class="tiny">PEL reclamation · XAUTOCLAIM</text>
+    <rect x="721" y="352" width="132" height="28" rx="14" fill="#881337" stroke="#fda4af" stroke-opacity=".7"/>
+    <text x="742" y="371" class="danger">task_stream:dlq</text>
+  </g>
+
+  <!-- worker -->
+  <g filter="url(#shadow)">
+    <rect x="1110" y="205" width="352" height="184" rx="20" fill="url(#worker)" stroke="#c4b5fd" stroke-opacity=".65"/>
+    <circle cx="1150" cy="247" r="17" fill="#4c1d95" stroke="#ddd6fe"/>
+    <path d="M1142 253l8-13 8 13M1144 253h12" fill="none" stroke="#ddd6fe" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1184" y="246" class="card-title">Worker Deployment</text>
+    <text x="1138" y="285" class="card-copy">queue-worker-deployment · pods 1–10</text>
+    <text x="1138" y="314" class="tiny">:8082 /metrics · GOMAXPROCS goroutines</text>
+    <text x="1138" y="338" class="tiny">EMAIL / IMAGE · record outcome → XACK</text>
+    <rect x="1138" y="352" width="154" height="24" rx="12" fill="#5b21b6" stroke="#c4b5fd" stroke-opacity=".55"/>
+    <text x="1156" y="369" class="label">Kubernetes pods</text>
+  </g>
+
+  <!-- mysql -->
+  <g filter="url(#shadow)">
+    <rect x="1152" y="430" width="264" height="56" rx="16" fill="url(#mysql)" stroke="#fde68a" stroke-opacity=".62"/>
+    <circle cx="1182" cy="458" r="13" fill="#713f12" stroke="#fef3c7"/>
+    <path d="M1175 454h14M1175 460h14" stroke="#fef3c7" stroke-width="2" stroke-linecap="round"/>
+    <text x="1210" y="456" class="card-title">MySQL</text>
+    <text x="1210" y="477" class="tiny">mysql-service · task_execution</text>
+  </g>
+
+  <!-- outcome footer -->
+  <g>
+    <rect x="342" y="433" width="218" height="42" rx="14" fill="#12372a" stroke="#22c55e" stroke-opacity=".55"/>
+    <text x="364" y="459" class="success">SUCCESS · complete + XACK</text>
+    <rect x="592" y="433" width="250" height="42" rx="14" fill="#422006" stroke="#f59e0b" stroke-opacity=".6"/>
+    <text x="615" y="459" class="warning">RETRY · Lua XADD + XACK</text>
+    <rect x="874" y="433" width="224" height="42" rx="14" fill="#4c0519" stroke="#fb7185" stroke-opacity=".65"/>
+    <text x="895" y="459" class="danger">FINAL FAILURE · DLQ + XACK</text>
+  </g>
+
+  <!-- data arrows -->
+  <path d="M266 299 H326" fill="none" stroke="#2dd4bf" stroke-width="4" marker-end="url(#arrow-teal)"/>
+  <text x="279" y="281" class="label">JSON</text>
+  <path d="M606 299 H676" fill="none" stroke="#2dd4bf" stroke-width="4" marker-end="url(#arrow-teal)"/>
+  <text x="620" y="281" class="label">XADD</text>
+  <path d="M1022 299 H1092" fill="none" stroke="#2dd4bf" stroke-width="4" marker-end="url(#arrow-teal)"/>
+  <text x="1038" y="281" class="label">XREADGROUP</text>
+  <path d="M1286 389 V414" fill="none" stroke="#fbbf24" stroke-width="3" marker-end="url(#arrow-amber)"/>
+  <text x="1300" y="409" class="warning">claim / update</text>
+  <path d="M1110 365 C1058 405 996 408 892 408" fill="none" stroke="#fbbf24" stroke-width="3" stroke-dasharray="9 8" marker-end="url(#arrow-amber)"/>
+  <text x="974" y="396" class="warning">retry</text>
+  <path d="M1022 345 C1050 368 1067 368 1092 346" fill="none" stroke="#fbbf24" stroke-width="2.6" stroke-dasharray="7 7" marker-end="url(#arrow-amber)"/>
+  <text x="995" y="370" class="warning">XAUTOCLAIM ≥30 s</text>
+  <path d="M1110 376 C1055 454 975 454 860 454" fill="none" stroke="#fb7185" stroke-width="3" stroke-dasharray="9 8" marker-end="url(#arrow-red)"/>
+
+  <!-- control and observability plane -->
+  <rect x="48" y="578" width="1504" height="408" rx="22" fill="#0f172a" fill-opacity=".56" stroke="#334155"/>
+  <text x="78" y="611" class="plane">CONTROL PLANE &amp; OBSERVABILITY</text>
+  <rect x="1300" y="589" width="219" height="26" rx="13" fill="#1e293b" stroke="#475569"/>
+  <text x="1325" y="607" class="label">monitoring namespace</text>
+
+  <!-- autoscaling subpanel -->
+  <rect x="82" y="638" width="688" height="302" rx="20" fill="url(#panel)" stroke="#334155"/>
+  <text x="112" y="674" class="plane">AUTOSCALING · REDIS LAG → KEDA → HPA</text>
+  <g filter="url(#shadow)">
+    <rect x="115" y="732" width="144" height="92" rx="16" fill="#3f1d2a" stroke="#fb7185" stroke-opacity=".6"/>
+    <text x="142" y="770" class="card-title">Group lag</text>
+    <text x="143" y="795" class="tiny">Redis Streams</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="329" y="712" width="156" height="132" rx="18" fill="url(#keda)" stroke="#6ee7b7" stroke-opacity=".7"/>
+    <text x="371" y="759" class="card-title">KEDA</text>
+    <text x="357" y="786" class="tiny">ScaledObject</text>
+    <text x="350" y="810" class="tiny">lagCount: 20</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="555" y="732" width="174" height="92" rx="16" fill="#1e3a5f" stroke="#93c5fd" stroke-opacity=".65"/>
+    <text x="616" y="770" class="card-title">HPA</text>
+    <text x="586" y="795" class="tiny">replicas 1 → 10</text>
+  </g>
+  <path d="M259 778 H310" fill="none" stroke="#34d399" stroke-width="4" marker-end="url(#arrow-green)"/>
+  <path d="M485 778 H537" fill="none" stroke="#34d399" stroke-width="4" marker-end="url(#arrow-green)"/>
+  <path d="M642 732 C690 678 845 660 1086 643" fill="none" stroke="#34d399" stroke-width="3" stroke-dasharray="9 8" marker-end="url(#arrow-green)"/>
+  <text x="766" y="671" class="success">scales the worker Deployment</text>
+  <text x="113" y="891" class="tiny">KEDA reads Redis directly. Prometheus is observability-only.</text>
+
+  <!-- observability subpanel -->
+  <rect x="806" y="638" width="710" height="302" rx="20" fill="url(#panel)" stroke="#334155"/>
+  <text x="836" y="674" class="plane">OBSERVABILITY · SCRAPES EVERY 5 SECONDS</text>
+  <g>
+    <rect x="842" y="716" width="190" height="50" rx="14" fill="#164e63" stroke="#67e8f9" stroke-opacity=".55"/>
+    <text x="867" y="747" class="label">Producer /metrics</text>
+    <rect x="842" y="781" width="190" height="50" rx="14" fill="#4c1d95" stroke="#c4b5fd" stroke-opacity=".55"/>
+    <text x="874" y="812" class="label">Worker /metrics</text>
+    <rect x="842" y="846" width="190" height="50" rx="14" fill="#1e293b" stroke="#94a3b8" stroke-opacity=".55"/>
+    <text x="858" y="877" class="label">cAdvisor + KSM</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1110" y="740" width="168" height="128" rx="18" fill="url(#prometheus)" stroke="#fdba74" stroke-opacity=".7"/>
+    <circle cx="1145" cy="782" r="15" fill="#9a3412" stroke="#ffedd5"/>
+    <path d="M1137 790l8-18 8 18M1139 785h12" fill="none" stroke="#ffedd5" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1172" y="782" class="card-title">Prometheus</text>
+    <text x="1134" y="818" class="tiny">metrics · rates · p95</text>
+    <text x="1134" y="842" class="tiny">queue health · pods</text>
+  </g>
+  <g filter="url(#shadow)">
+    <rect x="1350" y="740" width="130" height="128" rx="18" fill="url(#grafana)" stroke="#f9a8d4" stroke-opacity=".72"/>
+    <circle cx="1382" cy="782" r="15" fill="#9d174d" stroke="#fce7f3"/>
+    <path d="M1374 789c11-2 12-16 3-18m-3 18c6 5 16-1 15-9m-15 9c-2-8 9-15 16-9" fill="none" stroke="#fce7f3" stroke-width="2.1" stroke-linecap="round"/>
+    <text x="1408" y="782" class="card-title">Grafana</text>
+    <text x="1372" y="818" class="tiny">dashboards</text>
+    <text x="1364" y="842" class="tiny">KEDA · CPU · RAM</text>
+  </g>
+  <path d="M1032 741 H1090" fill="none" stroke="#fb923c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <path d="M1032 806 H1090" fill="none" stroke="#fb923c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <path d="M1032 871 H1090" fill="none" stroke="#fb923c" stroke-width="3" marker-end="url(#arrow-orange)"/>
+  <path d="M1278 804 H1330" fill="none" stroke="#fb923c" stroke-width="4" marker-end="url(#arrow-orange)"/>
+
+  <text x="70" y="1016" class="subtitle">Demo scope: local Docker Desktop Kubernetes · Redis and MySQL are single-replica, non-persistent demo services.</text>
+</svg>

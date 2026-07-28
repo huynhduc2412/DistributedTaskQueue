@@ -16,43 +16,11 @@ A CV-focused learning project that demonstrates asynchronous task processing wit
 
 ## Architecture
 
-### Task processing flow
+![Architecture of the task flow, KEDA autoscaling, and Prometheus/Grafana observability](docs/images/architecture.svg)
 
-```text
-Client
-  │ POST /submit (JSON)
-  ▼
-┌──────────────────────────────────────────────────────┐
-│ Go producer                                           │
-│ :8080 /submit and /metrics                            │
-│ - decodes JSON                                        │
-│ - creates a UUID job_id                               │
-│ - appends the task to task_stream                     │
-└──────────────────────────────┬───────────────────────┘
-                               │ XADD
-                               ▼
-┌──────────────────────────────────────────────────────┐
-│ Redis Streams                                         │
-│ task_stream / consumer group: worker_group            │
-│ task_stream:dlq                                       │
-└──────────────────────────────┬───────────────────────┘
-                               │ XREADGROUP
-                               ▼
-┌──────────────────────────────────────────────────────┐
-│ Worker pod                                            │
-│ - worker goroutines = runtime.GOMAXPROCS(0)           │
-│ - MySQL task_execution record                         │
-│ - EMAIL or IMAGE demo handler                         │
-│ - :8082 /metrics                                      │
-└───────────────┬──────────────────────────┬───────────┘
-                │ success                  │ handler failure
-                ▼                          ▼
-     mark MySQL completed + XACK    release MySQL record
-                                         │
-                       ┌─────────────────┴─────────────────┐
-                       ▼                                   ▼
-       Lua: XADD retry to task_stream + XACK     Lua: XADD task_stream:dlq + XACK
-```
+*Solid teal arrows show task delivery, dashed amber arrows show retry/recovery, dashed green arrows show KEDA/HPA control flow, and orange arrows show the metrics path. The source SVG is editable at [docs/images/architecture.svg](docs/images/architecture.svg).*
+
+### Task processing flow
 
 The producer only checks that the body is JSON; it does not enforce an application schema or persist metadata itself. The demo handlers registered by the worker are `EMAIL` and `IMAGE`, so submit a string `type` with one of those values.
 
@@ -66,25 +34,15 @@ MySQL is used by workers, not by the producer. It creates a `task_execution` tab
 - This is a best-effort, at-least-once recovery pattern. It is not an exactly-once guarantee: a stale MySQL `processing` record has no lease/recovery path, and shutdown acknowledgements can fail and be reclaimed later.
 - The repository has a DLQ stream, but no replay API or replay service. Inspect and replay DLQ messages manually.
 
+### Graceful shutdown behavior
+
+The worker listens for `SIGINT` and `SIGTERM` through `signal.NotifyContext`. On cancellation, the dispatcher stops accepting new Redis messages, the PEL reclaimer and queue-health poller stop, the dispatcher closes the in-memory task channel, and `pool.Run` waits for worker goroutines that were already given a task before the process exits.
+
+This is only a best-effort drain, not a durable "finish, record completion, then ACK" protocol. The current `EMAIL` and `IMAGE` demo handlers do not stop their simulated sleep when the context is cancelled. More importantly, the same cancelled context is passed to `MarkCompleted`, retry/release, and Redis `XACK`; their failures are not fully handled. A task can therefore finish its handler during shutdown yet remain in the PEL, then be reclaimed after 30 seconds. Do not treat the `Shutdown gracefully` log line as an end-to-end delivery guarantee.
+
 ### Scaling and observability flow
 
-```text
-                     Redis Streams consumer-group lag
-                                      │
-                                      ▼
-                              KEDA ScaledObject
-                                      │
-                                      ▼
-                              Kubernetes HPA
-                                      │
-                                      ▼
-                         Kubernetes worker Deployment
-
-producer :8080/metrics ─┐
-worker   :8082/metrics ─┼──> Prometheus ───> Grafana
-Kubernetes cAdvisor ───┤
-kube-state-metrics ────┘
-```
+The lower lane of the diagram separates control from monitoring: KEDA reads Redis consumer-group lag, creates/manages an HPA, and changes only the worker Deployment from 1 to 10 Pods. Prometheus independently scrapes annotated producer and worker Pods, kube-state-metrics, and cAdvisor; Grafana queries Prometheus for dashboards.
 
 KEDA reads Redis directly and manages an HPA; Prometheus does not make scaling decisions. The worker's PEL and DLQ gauges are observability data, not KEDA triggers in this repository.
 
@@ -345,6 +303,7 @@ The following Grafana captures are from the local stress-test window above.
 - The producer's admission guard uses Redis `XLEN`, which is the retained stream length rather than current consumer-group lag. Stream entries are never trimmed, so this is not a reliable live-backlog limit and eventually rejects new work after enough historical entries.
 - Task retries are immediate and the retry boundary currently permits four requeues. Add delayed backoff and align the retry condition with the desired policy.
 - The MySQL processing record needs a lease/expiry or recovery workflow before it can support a strong crash-recovery or exactly-once claim.
+- Graceful shutdown needs a readiness/drain phase plus a separate bounded finalization context before it can safely guarantee completion recording and `XACK` for in-flight work.
 - There is no DLQ replay workflow, request schema validation, authenticated API, or ingress configuration.
 - The repository currently has no `*_test.go` files. `go test ./...` is a package compile/verification check, not a unit-test suite.
 - Kubernetes autoscaling has been functionally tested only on a one-node Docker Desktop cluster (Kubernetes `v1.34.1`, KEDA `v2.20.1`). It is not a multi-node, capacity, HA, or managed-cluster validation; repeat the test after changing KEDA, Redis, HPA, or cluster configuration.
