@@ -77,6 +77,15 @@ func init() {
 
 const maxRetries = 3
 
+func retryCountFrom(values map[string]interface{}) int {
+	retryCount, _ := strconv.Atoi(fmt.Sprint(values["retry_count"]))
+	return retryCount
+}
+
+func canRetry(retryCount int) bool {
+	return retryCount <= maxRetries
+}
+
 type WorkerStatus struct {
 	SuccessCount uint64 `json:"success_count"`
 	FailureCount uint64 `json:"failure_count"`
@@ -381,11 +390,8 @@ var luaRetryScript = redis.NewScript(`
 `)
 
 func (p *WorkerPool) hanldRetry(ctx context.Context, msg redis.XMessage, err error) string {
-	retryCount := 0
-	if val, ok := msg.Values["retry_count"].(string); ok {
-		retryCount, _ = strconv.Atoi(val)
-	}
-	if retryCount <= maxRetries {
+	retryCount := retryCountFrom(msg.Values)
+	if canRetry(retryCount) {
 		atomic.AddUint64(&p.retryCount, 1)
 		tasksProcessed.WithLabelValues("retry", p.podName).Inc()
 		retryCount++

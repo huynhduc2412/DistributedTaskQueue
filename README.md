@@ -75,6 +75,22 @@ The producer returns `200 Job Enqueued` after a successful Redis `XADD`. The han
 
 Do not send untrusted production data to this demo. The worker logs recipients/URLs, and retry/DLQ stream payloads include error fields. Those values are deliberately excluded from Prometheus labels.
 
+## Tests
+
+Run the hermetic unit tests for worker-pool helpers and the MySQL idempotency-store SQL contract:
+
+```bash
+go test ./...
+```
+
+The end-to-end worker test is opt-in. It verifies Redis Streams retry/acknowledgement and MySQL duplicate suppression against real services, using isolated Redis stream names. Start the local Redis and MySQL services first, then run:
+
+```bash
+TEST_REDIS_ADDR=127.0.0.1:6379 \
+TEST_MYSQL_DSN='root:root@tcp(127.0.0.1:3306)/queue?parseTime=true' \
+go test -tags=integration ./internal/workerpool
+```
+
 ## Local Docker Compose
 
 Prerequisites: Docker Compose v2 and Go 1.24+ only if you want to run the stress client.
@@ -305,7 +321,7 @@ The following Grafana captures are from the local stress-test window above.
 - The MySQL processing record needs a lease/expiry or recovery workflow before it can support a strong crash-recovery or exactly-once claim.
 - Graceful shutdown needs a readiness/drain phase plus a separate bounded finalization context before it can safely guarantee completion recording and `XACK` for in-flight work.
 - There is no DLQ replay workflow, request schema validation, authenticated API, or ingress configuration.
-- The repository currently has no `*_test.go` files. `go test ./...` is a package compile/verification check, not a unit-test suite.
+- Unit tests cover worker-pool helper behavior and MySQL idempotency SQL interactions. The Redis/MySQL end-to-end worker test is opt-in because it requires real local services.
 - Kubernetes autoscaling has been functionally tested only on a one-node Docker Desktop cluster (Kubernetes `v1.34.1`, KEDA `v2.20.1`). It is not a multi-node, capacity, HA, or managed-cluster validation; repeat the test after changing KEDA, Redis, HPA, or cluster configuration.
 
 ## Verification checklist
